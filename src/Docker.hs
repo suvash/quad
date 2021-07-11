@@ -29,19 +29,30 @@ containerIdToText (ContainerId id) = id
 data CreateContainerOptions
   = CreateContainerOptions
       { image :: Image
+      , script :: Text
       }
 
 data Service
   = Service
       { createContainer :: CreateContainerOptions -> IO ContainerId
       , startContainer :: ContainerId -> IO ()
+      , containerStatus :: ContainerId -> IO ContainerStatus
       }
 
 createService :: IO Service
 createService = do
+  manager <- Socket.newManager "/var/run/docker.sock"
+
+  let makeReq :: RequestBuilder
+      makeReq path =
+          HTTP.defaultRequest
+          & HTTP.setRequestManager manager
+          & HTTP.setRequestPath (encodeUtf8 $ "/v1.40" <> path)
+
   pure Service
-    { createContainer = createContainer_
-    , startContainer = startContainer_
+    { createContainer = createContainer_ makeReq
+    , startContainer = startContainer_ makeReq
+    , containerStatus = containerStatus_ makeReq
     }
 
 parseResponse
@@ -57,22 +68,28 @@ parseResponse res parser = do
     Left e -> throwString e
     Right status -> pure status
 
-createContainer_ :: CreateContainerOptions -> IO ContainerId
-createContainer_ options = do
-  manager <- Socket.newManager "/var/run/docker.sock"
+data ContainerStatus
+  = ContainerRunning
+  | ContainerExited ContainerExitCode
+  | ContainerOther Text
+  deriving (Eq, Show)
 
+type RequestBuilder = Text -> HTTP.Request
+
+createContainer_ :: RequestBuilder -> CreateContainerOptions -> IO ContainerId
+createContainer_ makeReq options = do
   let image = imageToText options.image
   let body = Aeson.object
                [ ("Image", Aeson.toJSON image)
                , ("Tty", Aeson.toJSON True)
                , ("Labels", Aeson.object [("quad", "")])
-               , ("Cmd", "echo hello")
                , ("Entrypoint", Aeson.toJSON [Aeson.String "/bin/sh", "-c"])
+               , ("Cmd", "echo \"$QUAD_SCRIPT\" | /bin/sh")
+               , ("Env", Aeson.toJSON ["QUAD_SCRIPT=" <> options.script])
                ]
 
-  let req = HTTP.defaultRequest
-          & HTTP.setRequestManager manager
-          & HTTP.setRequestPath "/v1.40/containers/create"
+  let path = "/containers/create"
+  let req = makeReq path
           & HTTP.setRequestMethod "POST"
           & HTTP.setRequestBodyJSON body
 
@@ -83,16 +100,28 @@ createContainer_ options = do
   res <- HTTP.httpBS req
   parseResponse res parser
 
-startContainer_ :: ContainerId -> IO ()
-startContainer_ container = do
-  manager <- Socket.newManager "/var/run/docker.sock"
-
-  let path
-        = "/v1.40/containers/" <> containerIdToText container <> "/start"
-
-  let req = HTTP.defaultRequest
-          & HTTP.setRequestManager manager
-          & HTTP.setRequestPath (encodeUtf8 path)
+startContainer_ :: RequestBuilder -> ContainerId -> IO ()
+startContainer_ makeReq container = do
+  let path = "/containers/" <> containerIdToText container <> "/start"
+  let req = makeReq path
           & HTTP.setRequestMethod "POST"
 
   void $ HTTP.httpBS req
+
+containerStatus_ :: RequestBuilder -> ContainerId -> IO ContainerStatus
+containerStatus_ makeReq container = do
+  let parser = Aeson.withObject "container-inspect" $ \o -> do
+        state <- o .: "State"
+        status <- state .: "Status"
+        case status of
+          "running" -> pure ContainerRunning
+          "exited" -> do
+            code <- state .: "ExitCode"
+            pure $ ContainerExited (ContainerExitCode code)
+          other -> pure $ ContainerOther other
+
+  let req = makeReq
+          $ "/containers/" <> containerIdToText container <> "/json"
+
+  res <- HTTP.httpBS req
+  parseResponse res parser
