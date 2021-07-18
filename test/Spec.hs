@@ -142,32 +142,25 @@ testYamlDecoding runner = do
   result <- runner.runBuild emptyHooks build
   result.state `shouldBe` BuildFinished BuildSucceeded
 
-testServerAndAgent :: Runner.Service -> IO ()
-testServerAndAgent runner = do
+runServerAndAgent ::
+  (JobHandler.Service -> IO ())
+  -> Runner.Service
+  -> IO ()
+runServerAndAgent callback runner = do
   handler <- JobHandler.Memory.createService
 
   serverThread <- Async.async do
     Server.run (Server.Config 9000) handler
-
   Async.link serverThread
 
   agentThread <- Async.async do
     Agent.run (Agent.Config "http://localhost:9000") runner
-
   Async.link agentThread
 
-  let pipeline = makePipeline
-             [ makeStep "agent-test" "busybox" ["echo hello", "echo from agent"]
-             ]
-
-  number <- handler.queueJob pipeline
-  checkBuild handler number
+  callback handler
 
   Async.cancel serverThread
   Async.cancel agentThread
-
-  pure ()
-
 
 checkBuild :: JobHandler.Service -> BuildNumber -> IO ()
 checkBuild handler number = loop
@@ -180,3 +173,14 @@ checkBuild handler number = loop
             BuildFinished s -> s `shouldBe` BuildSucceeded
             _ -> loop
         _ -> loop
+
+testServerAndAgent :: Runner.Service -> IO ()
+testServerAndAgent = do
+  runServerAndAgent $ \handler -> do
+    let pipeline =
+          makePipeline
+            [ makeStep "agent-test" "busybox" ["echo hello", "echo from agent"]
+            ]
+
+    number <- handler.queueJob pipeline
+    checkBuild handler number
