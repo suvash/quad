@@ -8,11 +8,13 @@ import qualified Data.Aeson.Types as Aeson.Types
 import qualified Data.Time.Clock.POSIX as Time
 import qualified RIO.Text as Text
 import qualified RIO.Text.Partial as Text.Partial
+import qualified Codec.Serialise as Serialise
+
 
 import qualified Socket
 
 data Image = Image { name :: Text, tag :: Text }
-  deriving (Eq, Show)
+  deriving (Eq, Show, Generic, Serialise.Serialise)
 
 imageToText :: Image -> Text
 imageToText image = image.name <> ":" <> image.tag
@@ -28,19 +30,19 @@ instance Aeson.FromJSON Image where
         fail $ "Image has too many colons" <> Text.unpack image
 
 newtype ContainerExitCode = ContainerExitCode Int
-  deriving (Eq, Show)
+  deriving (Eq, Show, Generic, Serialise.Serialise)
 
 exitCodeToInt :: ContainerExitCode -> Int
 exitCodeToInt (ContainerExitCode code) = code
 
 newtype ContainerId = ContainerId Text
-  deriving (Eq, Show)
+  deriving (Eq, Show, Generic, Serialise.Serialise)
 
 containerIdToText :: ContainerId -> Text
 containerIdToText (ContainerId id) = id
 
 newtype Volume = Volume Text
-  deriving (Eq, Show)
+  deriving (Eq, Show, Generic, Serialise.Serialise)
 
 volumeToText :: Volume -> Text
 volumeToText (Volume vol) = vol
