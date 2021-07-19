@@ -28,8 +28,8 @@ data Step
 newtype StepName = StepName Text
   deriving (Eq, Show, Ord, Generic, Aeson.FromJSON, Serialise.Serialise)
 
-stepNameToTex :: StepName -> Text
-stepNameToTex (StepName step) = step
+stepNameToText :: StepName -> Text
+stepNameToText (StepName step) = step
 
 data StepResult
   = StepFailed Docker.ContainerExitCode

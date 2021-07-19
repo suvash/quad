@@ -187,7 +187,16 @@ testServerAndAgent = do
             [ makeStep "agent-test" "busybox" ["echo hello", "echo from agent"]
             ]
 
-    number <- handler.queueJob pipeline
+    let info =
+          JobHandler.CommitInfo
+            { sha = "0000000"
+            , branch = "main"
+            , message = "test commit"
+            , author = "quad"
+            , repo = "quad-ci/quad"
+            }
+
+    number <- handler.queueJob info pipeline
     checkBuild handler number
 
 testWebhookTrigger :: Runner.Service -> IO ()
