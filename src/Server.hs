@@ -15,6 +15,8 @@ import qualified Data.Aeson as Aeson
 import qualified Network.HTTP.Types as HTTP.Types
 import qualified Network.Wai.Middleware.Cors as Cors
 
+import qualified System.Log.Logger as Logger
+
 data Config
   = Config
       { port :: Int
@@ -42,7 +44,7 @@ stepStateToText build step =
     _ -> stepNotRunning
     where
       stepNotRunning = case Map.lookup step.name build.completedSteps of
-        Just StepSucceeded -> "succeded"
+        Just StepSucceeded -> "succeeded"
         Just (StepFailed _) -> "failed"
         Nothing -> case build.state of
           BuildFinished _ -> "skipped"
@@ -97,8 +99,11 @@ run config handler =
         pipeline <- Github.fetchRemotePipeline info
 
         let step = Github.createCloneStep info
-        handler.queueJob info $ pipeline
+        number <- handler.queueJob info $ pipeline
           { steps = NonEmpty.cons step pipeline.steps }
+
+        Logger.infoM "quad.server" $ "Queued job" <> Core.displayBuildNumber number
+        pure number
 
       Scotty.json $
         Aeson.object
@@ -118,7 +123,7 @@ run config handler =
 
     Scotty.get "/build/:number/step/:step/logs" do
       number <- BuildNumber <$> Scotty.param "number"
-      step <- StepName <$> Scotty.param "steps"
+      step <- StepName <$> Scotty.param "step"
 
       log <- Scotty.liftAndCatchIO $ handler.fetchLogs number step
 
