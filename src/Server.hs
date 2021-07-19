@@ -3,16 +3,21 @@ module Server where
 import RIO
 import Core
 
+import qualified Github
 import qualified JobHandler
+
 import qualified Web.Scotty as Scotty
 import qualified Codec.Serialise as Serialise
+
+import qualified RIO.NonEmpty as NonEmpty
+import qualified Data.Aeson as Aeson
 
 data Config
   = Config
       { port :: Int
       }
 
-run :: Config -> JobHandler.Service -> IO()
+run :: Config -> JobHandler.Service -> IO ()
 run config handler =
   Scotty.scotty config.port do
     Scotty.post "/agent/pull" do
@@ -28,3 +33,20 @@ run config handler =
         handler.processMsg msg
 
       Scotty.json ("message processed" :: Text)
+
+    Scotty.post "/webhook/github" do
+      body <- Scotty.body
+
+      number <- Scotty.liftAndCatchIO do
+        info <- Github.parsePushEvent (toStrictBytes body)
+        pipeline <- Github.fetchRemotePipeline info
+
+        let step = Github.createCloneStep info
+        handler.queueJob $ pipeline
+          { steps = NonEmpty.cons step pipeline.steps }
+
+      Scotty.json $
+        Aeson.object
+          [ ("number", Aeson.toJSON $ Core.buildNumberToInt number)
+          , ("status", "job queued")
+          ]
